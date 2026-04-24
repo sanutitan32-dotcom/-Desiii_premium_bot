@@ -15,12 +15,14 @@ log = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8702277983:AAH5uO3PgpYN-G13aV9S461nqgu5s4M-UlM")
 ADMIN_ID  = int(os.getenv("ADMIN_ID", "6198353113"))
 
-# ── category maps (same as PHP) ──────────────────────────────
+# ── category maps ──────────────────────────────────────────
 CAT_MAP     = {"Indian": "indian", "R@p": "premium", "Child": "movies", "All": "all"}
 CAT_REVERSE = {v: k for k, v in CAT_MAP.items()}
 
-# ── keyboards ────────────────────────────────────────────────
-def admin_keyboard():
+# ── keyboards ──────────────────────────────────────────────
+def admin_keyboard(admin_id=None):
+    """Full admin keyboard. Notification button shows current state."""
+    notify_label = "🔔 New User Notif: ON" if (admin_id is None or db.get_admin_notify(admin_id)) else "🔕 New User Notif: OFF"
     return ReplyKeyboardMarkup([
         ["Change UPI",           "Change Username"],
         ["Change Price",         "Add Links"],
@@ -31,6 +33,7 @@ def admin_keyboard():
         ["➕ Add Admin",         "➖ Remove Admin"],
         ["👥 List Admins"],
         ["📢 Broadcast"],
+        [notify_label],
     ], resize_keyboard=True)
 
 USER_BOTTOM_KB = ReplyKeyboardMarkup([
@@ -43,9 +46,9 @@ CAT_KB = ReplyKeyboardMarkup([
     ["Child",  "All"],
 ], resize_keyboard=True)
 
-# ── helpers ──────────────────────────────────────────────────
+# ── helpers ────────────────────────────────────────────────
 def get_all_admins():
-    """Returns list of all admin IDs - main + extra admins from DB"""
+    """Returns list of all admin IDs - main + extra admins from DB."""
     try:
         s = db.all_settings()
         extra = s.get("extra_admins", "")
@@ -71,12 +74,11 @@ async def send_premium_categories(bot, chat_id):
     img = s.get("premium_image", "https://i.ibb.co/9x38myC/x.jpg")
 
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton(f" 👉𝗜𝗡𝗗𝗜𝗔𝗡 𝗗𝗔𝗦𝗜👈 - ₹{pi}",   callback_data="pay_indian")],
-        [InlineKeyboardButton(f" 🤤𝗥@𝗣 𝗩𝗜𝗗𝗘𝗢𝗦 🤤  - ₹{pp}",        callback_data="pay_premium")],
-        [InlineKeyboardButton(f" 🫦𝗖𝗛𝗜𝗟𝗗 𝗩𝗜𝗗𝗘𝗢𝗦 (𝟱𝟬𝗞+) 👈 - ₹{pm}",      callback_data="pay_movies")],
-        [InlineKeyboardButton(f" 🥵𝗔𝗟𝗟 𝗜𝗡 𝗢𝗡𝗘 𝟱𝟬+ 𝗚𝗥𝗢𝗨𝗣𝗦👈 - ₹{pa}",      callback_data="pay_all")],
+        [InlineKeyboardButton(f"👉𝗜𝗡𝗗𝗜𝗔𝗡 𝗗𝗔𝗦𝗜👈 - ₹{pi}",             callback_data="pay_indian")],
+        [InlineKeyboardButton(f"🤤𝗥@𝗣 𝗩𝗜𝗗𝗘𝗢𝗦🤤 - ₹{pp}",               callback_data="pay_premium")],
+        [InlineKeyboardButton(f"🫦𝗖𝗛𝗜𝗟𝗗 𝗩𝗜𝗗𝗘𝗢𝗦 (𝟱𝟬𝗞+)👈 - ₹{pm}",        callback_data="pay_movies")],
+        [InlineKeyboardButton(f"🥵𝗔𝗟𝗟 𝗜𝗡 𝗢𝗡𝗘 𝟱𝟬+ 𝗚𝗥𝗢𝗨𝗣𝗦👈 - ₹{pa}",       callback_data="pay_all")],
     ])
-    # Only photo + buttons, no extra text
     try:
         await bot.send_photo(chat_id=chat_id, photo=img, reply_markup=kb)
     except:
@@ -85,13 +87,10 @@ async def send_premium_categories(bot, chat_id):
 async def ask_for_screenshot(bot, chat_id):
     s = db.all_settings()
     db.set_state(chat_id, "wait_screenshot")
-    kb = InlineKeyboardMarkup([[
-        InlineKeyboardButton("PAYMENT DONE SEND SCREENSHOT ✅", callback_data="done_ss")
-    ]])
     await bot.send_message(
         chat_id=chat_id,
         text=(
-            f"📸 **📸 𝙎𝙀𝙉𝘿 𝙎𝘾𝙍𝙀𝙀𝙉𝙎𝙃𝙊𝙏 𝙊𝙁 𝙔𝙊𝙐𝙍 𝙋𝘼𝙔𝙈𝙀𝙉𝙏 𝙁𝙊𝙍 𝙂𝙀𝙏 𝙋𝙍𝙀𝙈𝙄𝙐𝙈.**\n\n"
+            f"📸 **𝙎𝙀𝙉𝘿 𝙎𝘾𝙍𝙀𝙀𝙉𝙎𝙃𝙊𝙏 𝙊𝙁 𝙔𝙊𝙐𝙍 𝙋𝘼𝙔𝙈𝙀𝙉𝙏 𝙁𝙊𝙍 𝙂𝙀𝙏 𝙋𝙍𝙀𝙈𝙄𝙐𝙈**\n\n"
             f"Support: {s.get('support','@support')}"
         ),
         parse_mode="Markdown"
@@ -103,7 +102,6 @@ async def send_payment_qr(bot, chat_id, cat):
     upi   = s.get("upi", "example@ybl")
     price = s.get(f"price_{cat}", "99")
 
-    # Generate QR locally
     upi_data = f"upi://pay?pa={upi}&pn=Premium&am={price}&cu=INR"
     qr = qrcode.QRCode(version=1, box_size=10, border=4)
     qr.add_data(upi_data)
@@ -116,12 +114,10 @@ async def send_payment_qr(bot, chat_id, cat):
     pay_text = (
         f"🏷️ 𝐏𝐫𝐢𝐜𝐞: ₹{price}\n\n"
         f"⏳ 𝐓𝐢𝐦𝐞 𝐋𝐞𝐟𝐭: 02:00\n\n"
-        f"1️⃣ 𝐒𝐜𝐚𝐧  |  2️⃣ 𝐏𝐚𝐲  |  3️⃣ 𝐂𝐥𝐢𝐜𝐤 ' PAYMENT DONE '"
+        f"1️⃣ 𝐒𝐜𝐚𝐧  |  2️⃣ 𝐏𝐚𝐲  |  3️⃣ 𝐂𝐥𝐢𝐜𝐤 'PAYMENT DONE'"
     )
 
-    # UPI deep links via intent redirect (works in Telegram)
     import urllib.parse as _up
-    _upi_enc = _up.quote(upi_data, safe="")
     phonpe = f"https://phon.pe/ru_" + _up.quote(f"{upi}&am={price}", safe="")
     paytm  = f"https://paytm.com/biz/pay?pa={upi}&am={price}"
     gpay   = f"https://gpay.app.goo.gl/pay"
@@ -153,16 +149,36 @@ async def send_payment_qr(bot, chat_id, cat):
 # ═══════════════════════════════════════════════════════════
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    db.add_user(user.id, user.first_name, user.username or "NoUsername")
+    is_new = db.add_user(user.id, user.first_name, user.username or "NoUsername")
     db.set_state(user.id, "none")
 
     if is_admin(user.id):
         role = "👑 Main Admin" if int(user.id) == ADMIN_ID else "👤 Sub Admin"
         await update.message.reply_text(
             f"Welcome {role}!\nBot developed by @nglynx",
-            reply_markup=admin_keyboard()
+            reply_markup=admin_keyboard(user.id)
         )
     else:
+        # Notify admins who have new_user_notify ON
+        if is_new:
+            notify_text = (
+                f"🆕 **New User Joined!**\n\n"
+                f"👤 Name: {user.first_name}\n"
+                f"🔗 Username: @{user.username or 'NoUsername'}\n"
+                f"🆔 ID: `{user.id}`\n\n"
+                f"📊 Total Users: {db.total_users()}"
+            )
+            for admin_id in get_all_admins():
+                if db.get_admin_notify(admin_id):
+                    try:
+                        await context.bot.send_message(
+                            chat_id=admin_id,
+                            text=notify_text,
+                            parse_mode="Markdown"
+                        )
+                    except Exception as e:
+                        log.error(f"New user notify error for admin {admin_id}: {e}")
+
         user_text = (
             "Available Videos Collection?\n\n"
             "1. Mom Son videos - 5000+\n"
@@ -174,9 +190,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "7. Hidden cam videos - 2000+"
         )
         inline_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("💎 Get Premium",          callback_data="get_premium")],
-            [InlineKeyboardButton("🥵 Demo Videos",          callback_data="view_demos")],
-            [InlineKeyboardButton("✅ How To Get Premium",   callback_data="how_to")],
+            [InlineKeyboardButton("💎 Get Premium",        callback_data="get_premium")],
+            [InlineKeyboardButton("🥵 Demo Videos",        callback_data="view_demos")],
+            [InlineKeyboardButton("✅ How To Get Premium", callback_data="how_to")],
         ])
         try:
             await update.message.reply_photo(
@@ -205,7 +221,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔹 **Add / Remove Demo:** Manage demo videos.\n"
         "🔹 **Check Users List:** See all users with IDs.\n"
         "🔹 **Check History:** See total approved/rejected payments.\n"
-        "🔹 **📢 Broadcast:** Send message to all users.",
+        "🔹 **📢 Broadcast:** Send message to all users.\n"
+        "🔹 **🔔 New User Notif:** Toggle new user join notifications ON/OFF.",
         parse_mode="Markdown"
     )
 
@@ -241,7 +258,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 all_admins = get_all_admins()
                 await message.reply_text(
                     f"✅ **Admin `{new_id}` added!**\n\n👥 All Admins: {len(all_admins)}",
-                    parse_mode="Markdown", reply_markup=admin_keyboard()
+                    parse_mode="Markdown", reply_markup=admin_keyboard(user.id)
                 )
             else:
                 await message.reply_text("❌ Send a valid Telegram User ID (numbers only)!")
@@ -259,7 +276,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if rem_id in ids:
                     ids.remove(rem_id)
                     db.set_setting("extra_admins", ",".join(ids))
-                    await message.reply_text(f"✅ **Admin `{rem_id}` removed!**", parse_mode="Markdown", reply_markup=admin_keyboard())
+                    await message.reply_text(f"✅ **Admin `{rem_id}` removed!**", parse_mode="Markdown", reply_markup=admin_keyboard(user.id))
                 else:
                     await message.reply_text(f"❌ ID `{rem_id}` not in extra admins.", parse_mode="Markdown")
                 db.set_state(user.id, "none")
@@ -270,19 +287,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if state == "wait_proof_link" and text:
             db.set_setting("proof_link", text.strip())
             db.set_state(user.id, "none")
-            await message.reply_text(f"✅ Proof link updated to: {text.strip()}", reply_markup=admin_keyboard())
+            await message.reply_text(f"✅ Proof link updated to: {text.strip()}", reply_markup=admin_keyboard(user.id))
             return
 
         if state == "wait_upi" and text:
             db.set_setting("upi", text)
             db.set_state(user.id, "none")
-            await message.reply_text(f"✅ UPI updated to: {text}", reply_markup=admin_keyboard())
+            await message.reply_text(f"✅ UPI updated to: {text}", reply_markup=admin_keyboard(user.id))
             return
 
         if state == "wait_username" and text:
             db.set_setting("support", text)
             db.set_state(user.id, "none")
-            await message.reply_text(f"✅ Support username updated to: {text}", reply_markup=admin_keyboard())
+            await message.reply_text(f"✅ Support username updated to: {text}", reply_markup=admin_keyboard(user.id))
             return
 
         if state == "wait_price_category" and text:
@@ -295,7 +312,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             else:
                 db.set_state(user.id, "none")
-                await message.reply_text("❌ Cancelled.", reply_markup=admin_keyboard())
+                await message.reply_text("❌ Cancelled.", reply_markup=admin_keyboard(user.id))
             return
 
         if state.startswith("wait_price_val_") and text:
@@ -304,7 +321,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 db.set_setting(f"price_{cat}", text)
                 db.set_state(user.id, "none")
                 display = CAT_REVERSE.get(cat, cat)
-                await message.reply_text(f"✅ Price for {display} updated to ₹{text}!", reply_markup=admin_keyboard())
+                await message.reply_text(f"✅ Price for {display} updated to ₹{text}!", reply_markup=admin_keyboard(user.id))
             else:
                 await message.reply_text("❌ Numbers only please!")
             return
@@ -316,7 +333,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await message.reply_text(f"Send the new private channel link for {text}:")
             else:
                 db.set_state(user.id, "none")
-                await message.reply_text("❌ Cancelled.", reply_markup=admin_keyboard())
+                await message.reply_text("❌ Cancelled.", reply_markup=admin_keyboard(user.id))
             return
 
         if state.startswith("wait_link_val_") and text:
@@ -324,25 +341,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db.set_setting(f"link_{cat}", text)
             db.set_state(user.id, "none")
             display = CAT_REVERSE.get(cat, cat)
-            await message.reply_text(f"✅ Link for {display} updated!", reply_markup=admin_keyboard())
+            await message.reply_text(f"✅ Link for {display} updated!", reply_markup=admin_keyboard(user.id))
             return
 
         if state == "wait_demo_video" and video:
             db.add_demo(video.file_id)
             db.set_state(user.id, "none")
-            await message.reply_text("✅ Demo video added successfully!", reply_markup=admin_keyboard())
+            await message.reply_text("✅ Demo video added successfully!", reply_markup=admin_keyboard(user.id))
             return
 
         if state == "wait_premium_image" and photo:
             db.set_setting("premium_image", photo[-1].file_id)
             db.set_state(user.id, "none")
-            await message.reply_text("✅ Premium selection image updated!", reply_markup=admin_keyboard())
+            await message.reply_text("✅ Premium selection image updated!", reply_markup=admin_keyboard(user.id))
             return
 
         if state == "wait_how_to_video" and video:
             db.set_setting("how_to_video", video.file_id)
             db.set_state(user.id, "none")
-            await message.reply_text("✅ 'How To Get Premium' video updated!", reply_markup=admin_keyboard())
+            await message.reply_text("✅ 'How To Get Premium' video updated!", reply_markup=admin_keyboard(user.id))
             return
 
         if state == "wait_broadcast":
@@ -364,7 +381,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     fail += 1
             await message.reply_text(
                 f"📢 **Broadcast Done!**\n✅ Sent: {ok}\n❌ Failed: {fail}",
-                parse_mode="Markdown", reply_markup=admin_keyboard()
+                parse_mode="Markdown", reply_markup=admin_keyboard(user.id)
             )
             return
 
@@ -374,28 +391,39 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.set_state(user.id, "none")
         s = db.all_settings()
 
-        # Tell user
-        await context.bot.send_photo(
-            chat_id=user.id,
-            photo="https://i.ibb.co/ymm1Pvsv/x.png",
-            caption=(
-                f"⏳ Screenshot has been sent for approval\n\n"
-                f"You will get private channel link within 20 minutes\n\n"
-                f"Contact support {s.get('support','@support')} ✅"
+        # Tell user payment is pending
+        try:
+            await context.bot.send_photo(
+                chat_id=user.id,
+                photo="https://i.ibb.co/ymm1Pvsv/x.png",
+                caption=(
+                    f"⏳ Screenshot has been sent for approval\n\n"
+                    f"You will get private channel link within 20 minutes\n\n"
+                    f"Contact support {s.get('support','@support')} ✅"
+                )
             )
-        )
+        except:
+            await context.bot.send_message(
+                chat_id=user.id,
+                text=(
+                    f"⏳ Screenshot has been sent for approval\n\n"
+                    f"You will get private channel link within 20 minutes\n\n"
+                    f"Contact support {s.get('support','@support')} ✅"
+                )
+            )
 
-        # Notify ALL admins
+        # ✅ FIX: Notify ALL admins with the payment screenshot
         admin_kb = InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ Approve", callback_data=f"approve_{user.id}"),
             InlineKeyboardButton("❌ Reject",  callback_data=f"reject_{user.id}")
         ]])
         caption = (
-            f"📢 **New Payment Verification**\n\n"
+            f"💰 **New Payment Verification**\n\n"
             f"👤 **User:** {user.first_name} (@{user.username or 'NoUsername'})\n"
-            f"🆔 **ID:** {user.id}\n\n"
-            f"**Approve or Reject?**"
+            f"🆔 **ID:** `{user.id}`\n\n"
+            f"✅ Approve or ❌ Reject?"
         )
+        sent_count = 0
         for admin_id in get_all_admins():
             try:
                 await context.bot.send_photo(
@@ -405,9 +433,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode="Markdown",
                     reply_markup=admin_kb
                 )
+                sent_count += 1
                 log.info(f"✅ Payment SS sent to admin {admin_id}")
             except Exception as e:
                 log.error(f"❌ Failed to notify admin {admin_id}: {e}")
+
+        if sent_count == 0:
+            log.error("❌ Could not send payment SS to ANY admin!")
         return
 
     # ══ REPLY KEYBOARD BUTTONS ═══════════════════════════
@@ -453,6 +485,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ══ ADMIN PANEL BUTTONS ═══════════════════════════════
     if adm:
+        # New User Notification Toggle
+        if "New User Notif" in text:
+            current = db.get_admin_notify(user.id)
+            new_state = not current
+            db.set_admin_notify(user.id, new_state)
+            status = "🔔 ON" if new_state else "🔕 OFF"
+            await message.reply_text(
+                f"✅ **New User Notifications: {status}**\n\n"
+                f"{'You will now receive notifications when new users join.' if new_state else 'You will no longer receive notifications when new users join.'}",
+                parse_mode="Markdown",
+                reply_markup=admin_keyboard(user.id)
+            )
+            return
+
         if text == "Change UPI":
             db.set_state(user.id, "wait_upi")
             await message.reply_text("Send the new UPI ID:")
@@ -542,19 +588,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         elif text == "👥 List Admins":
             all_admins = get_all_admins()
-            s = db.all_settings()
-            extra_raw = s.get("extra_admins", "")
-            extra_ids = [x.strip() for x in str(extra_raw).split(",") if x.strip()] if extra_raw else []
             lines = []
             for aid in all_admins:
+                notify_status = "🔔" if db.get_admin_notify(aid) else "🔕"
                 if aid == ADMIN_ID:
-                    lines.append(f"👑 **Main Admin:** `{aid}`")
+                    lines.append(f"👑 **Main Admin:** `{aid}` {notify_status}")
                 else:
-                    lines.append(f"👤 **Sub Admin:** `{aid}`")
-            total = len(all_admins)
+                    lines.append(f"👤 **Sub Admin:** `{aid}` {notify_status}")
             await message.reply_text(
-                f"👥 **All Admins ({total}):**\n\n" + "\n".join(lines) + 
-                f"\n\n➕ Use 'Add Admin' to add more\n➖ Use 'Remove Admin' to remove",
+                f"👥 **All Admins ({len(all_admins)}):**\n\n" + "\n".join(lines) +
+                f"\n\n{notify_status} = New user notification status",
                 parse_mode="Markdown"
             )
 
@@ -573,7 +616,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data    = query.data
     chat_id = query.message.chat_id
-    msg_id  = query.message.message_id
     user    = query.from_user
     s       = db.all_settings()
 
@@ -584,7 +626,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.set_state(chat_id, "wait_screenshot")
         await context.bot.send_message(
             chat_id=chat_id,
-            text="📸 **SEND SCREENSHOT OF YOUR PAYMENT FOR GET PREMIUM**\n\nSend your screenshot now 👇",
+            text="📸 **SEND SCREENSHOT OF YOUR PAYMENT**\n\nSend your screenshot now 👇",
             parse_mode="Markdown"
         )
 
@@ -629,6 +671,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
     elif data.startswith("approve_"):
+        # ✅ Any admin can approve
         if not is_admin(user.id):
             await query.answer("Not authorized!", show_alert=True)
             return
@@ -636,7 +679,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         support = s.get("support", "@support")
         db.inc_history("approved")
 
-        # Build approval message with ALL pack links so admin sees which to send
         l_indian  = s.get("link_indian",  "https://t.me/link1")
         l_premium = s.get("link_premium", "https://t.me/link2")
         l_movies  = s.get("link_movies",  "https://t.me/link3")
@@ -647,12 +689,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Click below link to join private channel\n\n"
             f"Contact support {support}"
         )
-
         approval_kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("🇮🇳 Indian Pack",  url=l_indian)],
             [InlineKeyboardButton("😈 R@p Pack",      url=l_premium)],
-            [InlineKeyboardButton("👶 Child Pack",     url=l_movies)],
-            [InlineKeyboardButton("🔥 All In One",    url=l_all)],
+            [InlineKeyboardButton("👶 Child Pack",    url=l_movies)],
+            [InlineKeyboardButton("🔥 All In One",   url=l_all)],
         ])
 
         try:
@@ -665,18 +706,33 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             log.error(f"Approve send error: {e}")
 
-        # Update admin message to show approved
+        # Update the message for THIS admin
         try:
             old_cap = query.message.caption or "Payment"
             await query.edit_message_caption(
-                caption=old_cap + "\n\n✅ APPROVED",
+                caption=old_cap + f"\n\n✅ APPROVED by @{user.username or user.id}",
                 parse_mode="Markdown"
             )
         except:
             pass
+
+        # Also notify other admins that it was approved
+        approved_by = f"@{user.username}" if user.username else str(user.id)
+        for admin_id in get_all_admins():
+            if admin_id != user.id:
+                try:
+                    await context.bot.send_message(
+                        chat_id=admin_id,
+                        text=f"✅ Payment for user `{target}` was **APPROVED** by {approved_by}",
+                        parse_mode="Markdown"
+                    )
+                except:
+                    pass
+
         await query.answer("✅ Approved! Link sent to user.", show_alert=True)
 
     elif data.startswith("reject_"):
+        # ✅ Any admin can reject
         if not is_admin(user.id):
             await query.answer("Not authorized!", show_alert=True)
             return
@@ -699,23 +755,26 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             old_cap = query.message.caption or "Payment"
             await query.edit_message_caption(
-                caption=old_cap + "\n\n❌ REJECTED",
+                caption=old_cap + f"\n\n❌ REJECTED by @{user.username or user.id}",
                 parse_mode="Markdown"
             )
         except:
             pass
-        await query.answer("❌ Rejected! User notified.", show_alert=True)
-        return
 
-    elif data.startswith("REJECT_UNUSED_"):
-        # placeholder - remove this block
-        try:
-            await query.edit_message_caption(
-                caption=query.message.caption + "\n\n❌ **REJECTED**",
-                parse_mode="Markdown"
-            )
-        except:
-            await context.bot.send_message(chat_id=ADMIN_ID, text=f"❌ Rejected user {target}")
+        # Notify other admins
+        rejected_by = f"@{user.username}" if user.username else str(user.id)
+        for admin_id in get_all_admins():
+            if admin_id != user.id:
+                try:
+                    await context.bot.send_message(
+                        chat_id=admin_id,
+                        text=f"❌ Payment for user `{target}` was **REJECTED** by {rejected_by}",
+                        parse_mode="Markdown"
+                    )
+                except:
+                    pass
+
+        await query.answer("❌ Rejected! User notified.", show_alert=True)
 
 
 # ═══════════════════════════════════════════════════════════

@@ -23,6 +23,10 @@ def init():
             key TEXT PRIMARY KEY, val INTEGER DEFAULT 0)""")
         c.execute("""CREATE TABLE IF NOT EXISTS states (
             user_id INTEGER PRIMARY KEY, state TEXT)""")
+        # Per-admin notification preferences
+        c.execute("""CREATE TABLE IF NOT EXISTS admin_prefs (
+            admin_id INTEGER PRIMARY KEY,
+            new_user_notify INTEGER DEFAULT 1)""")
         c.commit()
 
     defaults = {
@@ -68,10 +72,14 @@ def all_settings():
 
 # ── users ────────────────────────────────────────────────────
 def add_user(uid, name, username):
+    """Returns True if NEW user (just inserted), False if existing."""
     with conn() as c:
+        existing = c.execute("SELECT user_id FROM users WHERE user_id=?", (uid,)).fetchone()
+        is_new = existing is None
         c.execute("INSERT OR REPLACE INTO users (user_id,name,username) VALUES (?,?,?)",
                   (uid, name, username))
         c.commit()
+    return is_new
 
 def get_all_users():
     with conn() as c:
@@ -120,4 +128,19 @@ def get_history():
 def inc_history(key):
     with conn() as c:
         c.execute("UPDATE history SET val=val+1 WHERE key=?", (key,))
+        c.commit()
+
+# ── admin notification prefs ─────────────────────────────────
+def get_admin_notify(admin_id):
+    """Returns True if this admin wants new user notifications (default: ON)."""
+    with conn() as c:
+        r = c.execute("SELECT new_user_notify FROM admin_prefs WHERE admin_id=?", (admin_id,)).fetchone()
+    return (r["new_user_notify"] == 1) if r else True
+
+def set_admin_notify(admin_id, enabled: bool):
+    with conn() as c:
+        c.execute(
+            "INSERT OR REPLACE INTO admin_prefs (admin_id, new_user_notify) VALUES (?,?)",
+            (admin_id, 1 if enabled else 0)
+        )
         c.commit()
